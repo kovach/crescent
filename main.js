@@ -14,7 +14,6 @@ function ppDoc(x) {
   document.querySelector(rootContainer).innerHTML += `<p>${str(x)}</p>`
 }
 
-
 let world = {}
 
 function get(tag) {
@@ -84,9 +83,14 @@ function rename(tuple, names) {
   let result = {};
   let i = 0;
   for (let name of names) {
-    if ((name in result && result[name] !== tuple[i]) || !(i in tuple))
-      return false
-    result[name] = tuple[i];
+    if (name[0] === '`' || name[0] === '\'') {
+      if (tuple[i] !== name.slice(1))
+        return false;
+    } else {
+      if ((name in result && result[name] !== tuple[i]) || !(i in tuple))
+        return false
+      result[name] = tuple[i];
+    }
     i++;
   }
   return result;
@@ -182,6 +186,8 @@ function test(fn, ...args) {
   let result = fn(...args);
   if (Array.isArray(result)) {
     result = result.map(r => `<li>${str(r)}</li>`).join('');
+  } else if (result === undefined) {
+    result = '✅';
   } else {
     result = str(result);
   }
@@ -191,29 +197,117 @@ function test(fn, ...args) {
 test(pp_parse, 'edge a b, edge b c');
 test(eval, 'edge a b, edge b c');
 
-function unrename(tuple, names) { return names.reduce((acc, name) => acc.concat([tuple[name]]), []); }
+function unrename(tuple, names) {
+  return names.reduce((acc, name) => {
+    if (name[0] === '`' || name[0] === '\'') {
+      return acc.concat(name.slice(1));
+    } else {
+      return acc.concat([tuple[name]])
+    }
+  }, []);
+}
 
 function evalRule({query, output}) {
-  let bindings = eval(query);
+  let bindings = joins(query);
   for (let tuple of bindings) {
-    for (let pattern of parseQuery(output)) {
+    for (let pattern of output) {
       yield(pattern[0], unrename(tuple, pattern[1]))
     }
   }
 }
 
-const r1 = {
-  query: 'edge a b, edge b c',
-  output: 'edge2 a c'
+function parseRule(str) {
+  let [query, output] = str.split('->').map(parseQuery);
+  return {query, output};
 }
 
-test(evalRule, r1);
+test(evalRule, parseRule('edge a b, edge b c -> edge2 a c'));
 test(eval, 'edge2 x y');
 
+function getId(id) {
+  return document.getElementById(id);
+}
+function create(type) {
+  let e = document.createElement(type);
+  childParent(e, getId('body'));
+  return e;
+}
+function childParent(child, parent) {
+  console.log(child);
+  assert(child !== null, `${child}, ${parent}`);
+  let maybeParent = child.parentNode;
+  if (maybeParent)
+    maybeParent.removeChild(child);
+  parent.appendChild(child);
+  return child;
+}
+function createChildElem(type, parent) {
+  return childParent(create(type), parent);
+}
+
+function createChildId(type, id) {
+  return createChildElem(type, getId(id));
+}
+
+function yieldElement(tag, id) {
+  let e = create(tag);
+  e.id = id;
+  return e;
+}
+
+yield('foo', ['a', 'b'])
+yield('foo', ['A', 'B'])
+test(eval, 'foo `A x');
+test(evalRule, parseRule('foo `a y -> bar `foo-bar y'));
+test(eval, 'bar x y');
+
+function assert(cond, msg) {
+  if (!cond) {
+    alert(msg);
+  }
+}
+
+function specialRelationHandler(tag, args) {
+  if (tag === 'create') {
+    assert(args.length === 2, `special relation 'create' takes element type, id: ${args}`);
+    yieldElement(args[0], args[1]);
+  } else if (tag === 'style') {
+    assert(args.length === 3, `special relation 'style' takes element id, attribute name, value: ${args}`);
+    //getId(args[0]).setAttribute(args[1], args[2]);
+    getId(args[0]).style[args[1]] = args[2];
+  } else if (tag === 'parent') {
+    assert(args.length === 2, `special relation 'parent' takes child id, parent id: ${args}`);
+    childParent(getId(args[0]), getId(args[1]));
+  } else if (tag === 'inner') {
+    assert(args.length === 2, `special relation 'inner' takes element id, value: ${args}`);
+    getId(args[0]).innerHTML = args[1];
+  }
+}
+
+function evalRule2({query, output}) {
+  let bindings = joins(query);
+  for (let tuple of bindings) {
+    for (let pattern of output) {
+      let tag = pattern[0];
+      let args = unrename(tuple, pattern[1]);
+      specialRelationHandler(tag, args);
+      // always do this
+      yield(tag, args)
+    }
+  }
+}
+
+let color = 0;
+test(evalRule2, parseRule(`
+  edge a b ->
+  create 'button a, parent a 'app, inner a a
+  , style a 'background '#dda
+`));
 
 // integration with dom
 // step 0 (re-evaluate query from scratch): clear out IDB
 // step 1: clear the whole dom and reconstruct on every change
+// step 2: tag elements with id, smart diff. attr `font-family `Arial
 
 // text-val f -> text-field f
 // text-val f -> text-field ('tf', f)
@@ -224,5 +318,5 @@ test(eval, 'edge2 x y');
 
 // refactor away from world
 
-
 // ? input idea `!select x`
+//
