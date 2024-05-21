@@ -96,68 +96,19 @@ function rename(tuple, names) {
   return result;
 }
 
-function chk(p1,p2) {
-  let r1 = get(p1[0]);
-  let r2 = get(p2[0]);
-  return join(
-    r1.map(t => rename(t, p1[1])),
-    r2.map(t => rename(t, p2[1]))
-  );
-}
-
 const relOfPat = p => get(p[0]).map(t => rename(t, p[1])).filter(t => t !== false);
 const joins = ps => ps.map(relOfPat).reduce(join, [{}]);
-// ['edge', ['x, 'y']] ->
-
-/*
-
- edge =
-   src | tgt
-   ---------
-   0   , 1
-   1   , 2
-   2   , 3
-   3   , 4
-
- people =
-   name | id | favorite cat
-   ---------------------
-   scott | 22 | ???
-
-
- SELECT src as a, tgt as b
- FROM edge
- -> a=0, b=1 ; a=1, b=2; ...
-
- SELECT E1.src as a, E1.tgt as b, E2.tgt as c
- FROM edge as E1, edge as E2
- WHERE E1.tgt = E2.src
-
- -> (a=0, b=1, c=2) (a=1, b=2, c=3)
-
- edge(a, b), edge(c, d)
- edge(a, b), edge(c, d), edge(e, f), edge(g, h)
-
- edge(a, b), edge(b, c)
-
- edge(foo, b)
- edge(a, 1)
- edge(0, 2)
-
- */
 
 function test1() {
-  [
-    joins([
+  [ joins([
     ['edge', [0,1]],
     ['edge', [1,2]]
-  ]),
-    joins([
+    ])
+  , joins([
     ['edge', ['a','b']],
     ['edge', ['b','c']],
     ['edge', ['c','d']],
-    ['edge', ['d','e']],
-  ])
+    ['edge', ['d','e']] ])
   ].map(pp);
 }
 
@@ -303,20 +254,3 @@ test(evalRule2, parseRule(`
   create 'button a, parent a 'app, inner a a
   , style a 'background '#dda
 `));
-
-// integration with dom
-// step 0 (re-evaluate query from scratch): clear out IDB
-// step 1: clear the whole dom and reconstruct on every change
-// step 2: tag elements with id, smart diff. attr `font-family `Arial
-
-// text-val f -> text-field f
-// text-val f -> text-field ('tf', f)
-// text-field f, value f v -> content f v
-
-// literal values in queries (number, string)
-// builtin functions
-
-// refactor away from world
-
-// ? input idea `!select x`
-//
