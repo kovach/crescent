@@ -14,19 +14,22 @@ function ppDoc(x) {
   document.querySelector(rootContainer).innerHTML += `<p>${str(x)}</p>`;
 }
 
-let world = {};
+function emptyDB() {
+  return new Map();
+}
+let world = emptyDB();
 
-function get(tag) {
-  let v = world[tag];
+function selectRel(db, tag) {
+  let v = db.get(tag);
   if (v === undefined) {
     v = [];
-    world[tag] = v;
+    db.set(tag, v);
   }
   return v;
 }
 
-function yield(tag, tuple) {
-  get(tag).push(tuple);
+function yield(db, tag, tuple) {
+  selectRel(db, tag).push(tuple);
   // redraw();
 }
 
@@ -44,12 +47,9 @@ function ppWorld(world) {
   return result;
 }
 
-yield("edge", [0, 1]);
-yield("edge", [1, 2]);
-yield("edge", [2, 3]);
-//yield('vert', [0]);
-//yield('vert', [1]);
-//yield('vert', [2]);
+yield(world, "edge", [0, 1]);
+yield(world, "edge", [1, 2]);
+yield(world, "edge", [2, 3]);
 
 function joinTuple(t, s) {
   t = structuredClone(t);
@@ -92,19 +92,26 @@ function rename(tuple, names) {
   return result;
 }
 
-const relOfPat = (p) =>
-  get(p[0])
+const selectPattern = (db, p) =>
+  selectRel(db, p[0])
     .map((t) => rename(t, p[1]))
     .filter((t) => t !== false);
-const joins = (ps) => ps.map(relOfPat).reduce(join, [{}]);
+
+const joins = (db, ps) =>
+  ps.map((p) => selectPattern(db, p)).reduce(join, [{}]);
+
+const joins_ = (db, ps) => {
+  if (ps.length === 0) return [];
+  return ps.map((p) => selectPattern(db, p)).reduce(join, [{}]);
+};
 
 function test1() {
   [
-    joins([
+    joins(world, [
       ["edge", [0, 1]],
       ["edge", [1, 2]],
     ]),
-    joins([
+    joins(world, [
       ["edge", ["a", "b"]],
       ["edge", ["b", "c"]],
       ["edge", ["c", "d"]],
@@ -134,7 +141,7 @@ const ppQuery = (ps) => {
 
 const pp_parse = (x) => compose(ppQuery, parseQuery)(x);
 
-const eval = (str) => joins(parseQuery(str));
+const eval = (db, str) => joins(db, parseQuery(str));
 
 function test(fn, ...args) {
   let result = fn(...args);
@@ -153,7 +160,7 @@ function test(fn, ...args) {
 }
 
 test(pp_parse, "edge a b, edge b c");
-test(eval, "edge a b, edge b c");
+test(eval, world, "edge a b, edge b c");
 
 function unrename(tuple, names) {
   return names.reduce((acc, name) => {
@@ -165,11 +172,11 @@ function unrename(tuple, names) {
   }, []);
 }
 
-function evalRule({ query, output }) {
-  let bindings = joins(query);
+function evalRule(db, { query, output }) {
+  let bindings = joins(db, query);
   for (let tuple of bindings) {
     for (let pattern of output) {
-      yield(pattern[0], unrename(tuple, pattern[1]));
+      yield(world, pattern[0], unrename(tuple, pattern[1]));
     }
   }
 }
@@ -179,8 +186,8 @@ function parseRule(str) {
   return { query, output };
 }
 
-test(evalRule, parseRule("edge a b, edge b c -> edge2 a c"));
-test(eval, "edge2 x y");
+test(evalRule, world, parseRule("edge a b, edge b c -> edge2 a c"));
+test(eval, world, "edge2 x y");
 
 function getId(id) {
   return document.getElementById(id);
@@ -210,11 +217,11 @@ function yieldElement(tag, id) {
   return e;
 }
 
-yield("foo", ["a", "b"]);
-yield("foo", ["A", "B"]);
-test(eval, "foo `A x");
-test(evalRule, parseRule("foo `a y -> bar `foo-bar y"));
-test(eval, "bar x y");
+yield(world, "foo", ["a", "b"]);
+yield(world, "foo", ["A", "B"]);
+test(eval, world, "foo `A x");
+test(evalRule, world, parseRule("foo `a y -> bar `foo-bar y"));
+test(eval, world, "bar x y");
 
 function assert(cond, msg) {
   if (!cond) {
@@ -251,15 +258,15 @@ function specialRelationHandler(tag, args) {
   }
 }
 
-function evalRule2({ query, output }) {
-  let bindings = joins(query);
+function evalRule2(db, { query, output }) {
+  let bindings = joins(db, query);
   for (let tuple of bindings) {
     for (let pattern of output) {
       let tag = pattern[0];
       let args = unrename(tuple, pattern[1]);
       specialRelationHandler(tag, args);
       // always do this
-      yield(tag, args);
+      yield(world, tag, args);
     }
   }
 }
@@ -267,9 +274,34 @@ function evalRule2({ query, output }) {
 let color = 0;
 test(
   evalRule2,
+  world,
   parseRule(`
 edge a b ->
-create 'button a, parent a 'app, inner a a
-, style a 'background '#dda
+  create 'button a,
+  parent a 'app,
+  inner a a,
+  style a 'background '#dda
 `)
 );
+
+// delta query without specialization
+function delta(ps, x, a) {
+  if (ps.length === 0) return [];
+  let R = ps[0];
+  let S = ps.slice(1);
+  let Rx = selectPattern(x, R);
+  let Ra = selectPattern(a, R);
+  let Sx = joins(x, S);
+  let Sa = delta(S, x, a);
+  return join(Ra, Sx).concat(join(Rx, Sa)).concat(join(Ra, Sa));
+}
+
+let x = emptyDB();
+let a = emptyDB();
+yield(x, "R", ["old"]);
+yield(x, "S", ["old"]);
+yield(a, "R", ["new"]);
+yield(a, "S", ["new"]);
+
+const pq = parseQuery;
+test(delta, pq("R x, S y"), x, a);
