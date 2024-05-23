@@ -1,4 +1,3 @@
-//document.querySelector('#app').innerHTML = ` `
 console.log("hi");
 
 const str = JSON.stringify;
@@ -7,17 +6,51 @@ const compose = (f, g) => (x) => f(g(x));
 
 const rootContainer = "#app";
 
+function scrollBody() {
+  window.scrollTo(0, document.body.scrollHeight);
+}
+
 function addDoc(x) {
   document.querySelector(rootContainer).innerHTML += `<p>${x}</p>`;
+  scrollBody();
 }
-function ppDoc(x) {
-  document.querySelector(rootContainer).innerHTML += `<p>${str(x)}</p>`;
+
+// display test results on page
+function test(fn, ...args) {
+  let result = fn(...args);
+  if (Array.isArray(result)) {
+    result = result.map((r) => `<li>${str(r)}</li>`).join("");
+  } else if (result === undefined) {
+    result = "✅";
+  } else {
+    result = str(result);
+  }
+  addDoc(
+    `${fn.name}(${args
+      .map((a) => JSON.stringify(a))
+      .join(", ")}): <ul>${result}</li>`
+  );
 }
 
 function emptyDB() {
   return new Map();
 }
 let world = emptyDB();
+
+function ppWorld(world) {
+  result = "";
+  for (let [key, val] of world) {
+    result += `<p>${key}: `;
+    result += JSON.stringify(val);
+    result += "</p>";
+  }
+  return result;
+}
+
+function redraw() {
+  document.querySelector(rootContainer).innerHTML += ` ${ppWorld(world)} `;
+  scrollBody();
+}
 
 function selectRel(db, tag) {
   let v = db.get(tag);
@@ -30,21 +63,6 @@ function selectRel(db, tag) {
 
 function yield(db, tag, tuple) {
   selectRel(db, tag).push(tuple);
-  // redraw();
-}
-
-function redraw() {
-  document.querySelector(rootContainer).innerHTML = ` ${ppWorld(world)} `;
-}
-
-function ppWorld(world) {
-  result = "";
-  for (let key in world) {
-    result += `<p>${key}: `;
-    result += JSON.stringify(world[key]);
-    result += "</p>";
-  }
-  return result;
 }
 
 yield(world, "edge", [0, 1]);
@@ -105,22 +123,17 @@ const joins_ = (db, ps) => {
   return ps.map((p) => selectPattern(db, p)).reduce(join, [{}]);
 };
 
-function test1() {
-  [
-    joins(world, [
-      ["edge", [0, 1]],
-      ["edge", [1, 2]],
-    ]),
-    joins(world, [
-      ["edge", ["a", "b"]],
-      ["edge", ["b", "c"]],
-      ["edge", ["c", "d"]],
-      ["edge", ["d", "e"]],
-    ]),
-  ].map(pp);
-}
+test(joins, world, [
+  ["edge", [0, 1]],
+  ["edge", [1, 2]],
+]);
 
-test1();
+test(joins, world, [
+  ["edge", ["a", "b"]],
+  ["edge", ["b", "c"]],
+  ["edge", ["c", "d"]],
+  ["edge", ["d", "e"]],
+]);
 
 function parseQuery(str) {
   // 'f a b, g b c'
@@ -142,22 +155,6 @@ const ppQuery = (ps) => {
 const pp_parse = (x) => compose(ppQuery, parseQuery)(x);
 
 const eval = (db, str) => joins(db, parseQuery(str));
-
-function test(fn, ...args) {
-  let result = fn(...args);
-  if (Array.isArray(result)) {
-    result = result.map((r) => `<li>${str(r)}</li>`).join("");
-  } else if (result === undefined) {
-    result = "✅";
-  } else {
-    result = str(result);
-  }
-  addDoc(
-    `${fn.name}(${args
-      .map((a) => JSON.stringify(a))
-      .join(", ")}): <ul>${result}</li>`
-  );
-}
 
 test(pp_parse, "edge a b, edge b c");
 test(eval, world, "edge a b, edge b c");
@@ -271,7 +268,6 @@ function evalRule2(db, { query, output }) {
   }
 }
 
-let color = 0;
 test(
   evalRule2,
   world,
