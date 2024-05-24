@@ -25,11 +25,7 @@ function test(fn, ...args) {
   } else {
     result = str(result);
   }
-  addDoc(
-    `${fn.name}(${args
-      .map((a) => JSON.stringify(a))
-      .join(", ")}): <ul>${result}</li>`
-  );
+  addDoc(`${fn.name}(${args.map((a) => JSON.stringify(a)).join(", ")}): <ul>${result}</li>`);
 }
 
 function emptyDB() {
@@ -61,8 +57,10 @@ function selectRel(db, tag) {
   return v;
 }
 
-function yield(db, tag, tuple) {
-  selectRel(db, tag).push(tuple);
+function yield(db, tag, tuple, sign = true) {
+  if (sign) {
+    selectRel(db, tag).push(tuple);
+  }
 }
 
 yield(world, "edge", [0, 1]);
@@ -101,8 +99,7 @@ function rename(tuple, names) {
     if (name[0] === "`" || name[0] === "'") {
       if (tuple[i] !== name.slice(1)) return false;
     } else {
-      if ((name in result && result[name] !== tuple[i]) || !(i in tuple))
-        return false;
+      if ((name in result && result[name] !== tuple[i]) || !(i in tuple)) return false;
       result[name] = tuple[i];
     }
     i++;
@@ -115,13 +112,7 @@ const selectPattern = (db, p) =>
     .map((t) => rename(t, p[1]))
     .filter((t) => t !== false);
 
-const joins = (db, ps) =>
-  ps.map((p) => selectPattern(db, p)).reduce(join, [{}]);
-
-const joins_ = (db, ps) => {
-  if (ps.length === 0) return [];
-  return ps.map((p) => selectPattern(db, p)).reduce(join, [{}]);
-};
+const joins = (db, ps) => ps.map((p) => selectPattern(db, p)).reduce(join, [{}]);
 
 test(joins, world, [
   ["edge", [0, 1]],
@@ -152,7 +143,8 @@ const ppQuery = (ps) => {
   return ps.map(([tag, vs]) => [tag].concat(vs).join(" ")).join(", ");
 };
 
-const pp_parse = (x) => compose(ppQuery, parseQuery)(x);
+// eta-expanded so that it has a `.name`
+const pp_parse = (x) => ppQuery(parseQuery(x));
 
 const eval = (db, str) => joins(db, parseQuery(str));
 
@@ -221,36 +213,28 @@ test(evalRule, world, parseRule("foo `a y -> bar `foo-bar y"));
 test(eval, world, "bar x y");
 
 function assert(cond, msg) {
-  if (!cond) {
-    alert(msg);
-  }
+  if (!cond) throw new Error(msg);
 }
 
+try {
+  assert(false, "expected error");
+  alert("assert should have failed!");
+} catch (e) {}
+
 function specialRelationHandler(tag, args) {
+  let msg = (name, expected) =>
+    `special relation '${name}' takes (${expected.join(",")}) but saw: (${args})`;
   if (tag === "create") {
-    assert(
-      args.length === 2,
-      `special relation 'create' takes element type, id: ${args}`
-    );
+    assert(args.length === 2, msg("create", ["element-type", "id"]));
     yieldElement(args[0], args[1]);
   } else if (tag === "style") {
-    assert(
-      args.length === 3,
-      `special relation 'style' takes element id, attribute name, value: ${args}`
-    );
-    //getId(args[0]).setAttribute(args[1], args[2]);
+    assert(args.length === 3, msg("style", ["id", "css-prop", "value"]));
     getId(args[0]).style[args[1]] = args[2];
   } else if (tag === "parent") {
-    assert(
-      args.length === 2,
-      `special relation 'parent' takes child id, parent id: ${args}`
-    );
+    assert(args.length === 2, msg("parent", ["id", "id"]));
     childParent(getId(args[0]), getId(args[1]));
   } else if (tag === "inner") {
-    assert(
-      args.length === 2,
-      `special relation 'inner' takes element id, value: ${args}`
-    );
+    assert(args.length === 2, msg("inner", ["id", "content"]));
     getId(args[0]).innerHTML = args[1];
   }
 }
@@ -301,3 +285,7 @@ yield(a, "S", ["new"]);
 
 const pq = parseQuery;
 test(delta, pq("R x, S y"), x, a);
+
+// something to note later: https://groups.google.com/g/v8-users/c/jlISWv1nXWU/m/LOLtbuovAgAJ
+
+// handle deletion (along with elements)
