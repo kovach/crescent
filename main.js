@@ -3,6 +3,8 @@ console.log("hi");
 const str = JSON.stringify;
 const pp = (x) => console.log(str(x));
 const compose = (f, g) => (x) => f(g(x));
+const af = Array.from;
+const afs = (x) => JSON.stringify(Array.from(x));
 
 const rootContainer = "#app";
 
@@ -48,47 +50,70 @@ function redraw() {
   scrollBody();
 }
 
+/* variables */
 function selectRel(db, tag) {
   let v = db.get(tag);
   if (v === undefined) {
-    v = [];
+    v = new Map();
     db.set(tag, v);
   }
   return v;
 }
+function key(tuple) {
+  return JSON.stringify(tuple);
+}
+function getKey(rel, key) {
+  let v = rel.get(key);
+  return v === undefined ? 0 : v[1];
+}
+function relAddTuple(rel, tuple, count = 1) {
+  let k = key(tuple);
+  let v = getKey(rel, k) + count;
+  if (v !== 0) rel.set(k, [tuple, v]);
+  else rel.delete(k);
+}
+function dbAddTuple(db, tag, tuple, count = 1) {
+  relAddTuple(selectRel(db, tag), tuple, count);
+}
+const yield = dbAddTuple;
+const remove = (db, tag, tuple) => dbAddTuple(db, tag, tuple, -1);
 
-function yield(db, tag, tuple, sign = true) {
-  if (sign) {
-    selectRel(db, tag).push(tuple);
+function* iterRel(db, tag) {
+  // todo
+  for (let v of selectRel(db, tag).values()) {
+    yield v[0];
   }
 }
+function iterRel_(db, tag) {
+  // todo
+  return selectRel(db, tag).values();
+}
+/* end variables */
 
 yield(world, "edge", [0, 1]);
 yield(world, "edge", [1, 2]);
 yield(world, "edge", [2, 3]);
 
-function joinTuple(t, s) {
+function joinTuple(t_, s_) {
+  let [t, tv] = t_;
   t = structuredClone(t);
+  let [s, sv] = s_;
   // in!
   for (let key in s) {
     if (key in t) {
       if (t[key] != s[key]) return false;
     } else t[key] = s[key];
   }
-  return t;
+  return [t, tv * sv];
 }
 
-function join(a, b) {
-  let result = [];
+function* join(a, b) {
   for (let t1 of a) {
     for (let t2 of b) {
       let t = joinTuple(t1, t2);
-      if (t != false) {
-        result.push(t);
-      }
+      if (t != false) yield t;
     }
   }
-  return result;
 }
 
 // todo: only works on numerically indexed tuples
@@ -107,19 +132,22 @@ function rename(tuple, names) {
   return result;
 }
 
-const selectPattern = (db, p) =>
-  selectRel(db, p[0])
-    .map((t) => rename(t, p[1]))
-    .filter((t) => t !== false);
+function* selectPattern(db, p) {
+  for (let t_ of iterRel_(db, p[0])) {
+    t = rename(t_[0], p[1]);
+    if (t !== false) yield [t, t_[1]];
+  }
+}
 
-const joins = (db, ps) => ps.map((p) => selectPattern(db, p)).reduce(join, [{}]);
+const joins = (db, ps) => ps.map((p) => selectPattern(db, p)).reduce(join, [[{}, 1]]);
+const joinsCollect = (db, ps) => Array.from(joins(db, ps));
 
-test(joins, world, [
+test(joinsCollect, world, [
   ["edge", [0, 1]],
   ["edge", [1, 2]],
 ]);
 
-test(joins, world, [
+test(joinsCollect, world, [
   ["edge", ["a", "b"]],
   ["edge", ["b", "c"]],
   ["edge", ["c", "d"]],
@@ -146,7 +174,7 @@ const ppQuery = (ps) => {
 // eta-expanded so that it has a `.name`
 const pp_parse = (x) => ppQuery(parseQuery(x));
 
-const eval = (db, str) => joins(db, parseQuery(str));
+const eval = (db, str) => Array.from(joins(db, parseQuery(str)));
 
 test(pp_parse, "edge a b, edge b c");
 test(eval, world, "edge a b, edge b c");
@@ -264,28 +292,61 @@ edge a b ->
 `)
 );
 
+function collect(i, acc) {
+  for (let v of i) acc.push(v);
+}
+
 // delta query without specialization
 function delta(ps, x, a) {
   if (ps.length === 0) return [];
   let R = ps[0];
   let S = ps.slice(1);
   let Rx = selectPattern(x, R);
-  let Ra = selectPattern(a, R);
+  let Ra = af(selectPattern(a, R));
   let Sx = joins(x, S);
-  let Sa = delta(S, x, a);
-  return join(Ra, Sx).concat(join(Rx, Sa)).concat(join(Ra, Sa));
+  let Sa = af(delta(S, x, a));
+  let result = [];
+  collect(join(Ra, Sx), result);
+  collect(join(Rx, Sa), result);
+  collect(join(Ra, Sa), result);
+  return result;
 }
 
 let x = emptyDB();
-let a = emptyDB();
 yield(x, "R", ["old"]);
 yield(x, "S", ["old"]);
+let a = emptyDB();
 yield(a, "R", ["new"]);
 yield(a, "S", ["new"]);
+let b = emptyDB();
+remove(b, "R", ["old"]);
+remove(b, "S", ["old"]);
 
 const pq = parseQuery;
+
 test(delta, pq("R x, S y"), x, a);
+test(delta, pq("R x, S y"), x, b);
 
 // something to note later: https://groups.google.com/g/v8-users/c/jlISWv1nXWU/m/LOLtbuovAgAJ
 
 // handle deletion (along with elements)
+function evalDelta(db, ddb, { query, output }) {
+  let bindings = delta(query, db, ddb);
+  for (let [tuple, weight] of bindings) {
+    for (let pattern of output) {
+      let tag = pattern[0];
+      let args = unrename(tuple, pattern[1]);
+      specialRelationHandler(tag, args);
+      yield(world, tag, args, weight);
+    }
+  }
+}
+
+{
+  let query = pq("R x, S y");
+  let output = pq("T x y");
+  test(evalDelta, emptyDB(), x, { query, output });
+  test(eval, world, "T x y");
+  test(evalDelta, x, b, { query, output });
+  test(eval, world, "T x y");
+}
