@@ -1,3 +1,4 @@
 [x] refactor away from world
-[ ] handle deletion
-[ ] accumulator array
+[x] handle deletion
+[x] accumulator array
+[ ] actual unit tests

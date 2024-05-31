@@ -6,6 +6,10 @@ const compose = (f, g) => (x) => f(g(x));
 const af = Array.from;
 const afs = (x) => JSON.stringify(Array.from(x));
 
+function assert(cond, msg) {
+  if (!cond) throw new Error(msg);
+}
+
 const rootContainer = "#app";
 
 function scrollBody() {
@@ -19,7 +23,8 @@ function addDoc(x) {
 
 // display test results on page
 function test(fn, ...args) {
-  let result = fn(...args);
+  let val = fn(...args);
+  let result = val;
   if (Array.isArray(result)) {
     result = result.map((r) => `<li>${str(r)}</li>`).join("");
   } else if (result === undefined) {
@@ -28,12 +33,13 @@ function test(fn, ...args) {
     result = str(result);
   }
   addDoc(`${fn.name}(${args.map((a) => JSON.stringify(a)).join(", ")}): <ul>${result}</li>`);
+  return val;
 }
 
-function emptyDB() {
+function emptyDb() {
   return new Map();
 }
-let world = emptyDB();
+let world = emptyDb();
 
 function ppWorld(world) {
   result = "";
@@ -66,27 +72,40 @@ function getKey(rel, key) {
   let v = rel.get(key);
   return v === undefined ? 0 : v[1];
 }
-function relAddTuple(rel, tuple, count = 1) {
-  let k = key(tuple);
+function relAddTupleWithKey(rel, k, tuple, count = 1) {
   let v = getKey(rel, k) + count;
   if (v !== 0) rel.set(k, [tuple, v]);
   else rel.delete(k);
 }
+function relAddTuple(rel, tuple, count = 1) {
+  let k = key(tuple);
+  return relAddTupleWithKey(rel, k, tuple, count);
+}
 function dbAddTuple(db, tag, tuple, count = 1) {
   relAddTuple(selectRel(db, tag), tuple, count);
+}
+function relAddRel(rel1, rel2) {
+  // mutates left arg
+  for (let [k, v] of rel2.entries()) {
+    relAddTupleWithKey(rel1, k, v[0], v[1]);
+  }
+}
+function dbAddDb(db1, db2) {
+  // mutates left arg
+  for (let [tag, rel] of db2.entries()) {
+    relAddRel(selectRel(db1, tag), rel);
+  }
 }
 const yield = dbAddTuple;
 const remove = (db, tag, tuple) => dbAddTuple(db, tag, tuple, -1);
 
-function* iterRel(db, tag) {
-  // todo
-  for (let v of selectRel(db, tag).values()) {
-    yield v[0];
-  }
-}
-function iterRel_(db, tag) {
-  // todo
+function iterRel(db, tag) {
   return selectRel(db, tag).values();
+}
+function printDb(db) {
+  console.log(
+    af(db.entries()).map(([tag, rel]) => [tag, af(rel.entries()).map(([key, [_, c]]) => [key, c])])
+  );
 }
 /* end variables */
 
@@ -133,7 +152,7 @@ function rename(tuple, names) {
 }
 
 function* selectPattern(db, p) {
-  for (let t_ of iterRel_(db, p[0])) {
+  for (let t_ of iterRel(db, p[0])) {
     t = rename(t_[0], p[1]);
     if (t !== false) yield [t, t_[1]];
   }
@@ -215,7 +234,6 @@ function create(type) {
   return e;
 }
 function childParent(child, parent) {
-  console.log(child);
   assert(child !== null, `${child}, ${parent}`);
   let maybeParent = child.parentNode;
   if (maybeParent) maybeParent.removeChild(child);
@@ -240,10 +258,7 @@ test(eval, world, "foo `A x");
 test(evalRule, world, parseRule("foo `a y -> bar `foo-bar y"));
 test(eval, world, "bar x y");
 
-function assert(cond, msg) {
-  if (!cond) throw new Error(msg);
-}
-
+// assert
 try {
   assert(false, "expected error");
   alert("assert should have failed!");
@@ -269,7 +284,7 @@ function specialRelationHandler(tag, args) {
 
 function evalRule2(db, { query, output }) {
   let bindings = joins(db, query);
-  for (let tuple of bindings) {
+  for (let [tuple, _] of bindings) {
     for (let pattern of output) {
       let tag = pattern[0];
       let args = unrename(tuple, pattern[1]);
@@ -297,7 +312,7 @@ function collect(i, acc) {
 }
 
 // delta query without specialization
-function delta(ps, x, a) {
+function* delta(ps, x, a) {
   if (ps.length === 0) return [];
   let R = ps[0];
   let S = ps.slice(1);
@@ -305,48 +320,52 @@ function delta(ps, x, a) {
   let Ra = af(selectPattern(a, R));
   let Sx = joins(x, S);
   let Sa = af(delta(S, x, a));
-  let result = [];
-  collect(join(Ra, Sx), result);
-  collect(join(Rx, Sa), result);
-  collect(join(Ra, Sa), result);
-  return result;
+  for (let t of join(Ra, Sx)) yield t;
+  for (let t of join(Rx, Sa)) yield t;
+  for (let t of join(Ra, Sa)) yield t;
 }
+const deltaCollect = (ps, x, a) => af(delta(ps, x, a));
 
-let x = emptyDB();
+let x = emptyDb();
 yield(x, "R", ["old"]);
 yield(x, "S", ["old"]);
-let a = emptyDB();
+let a = emptyDb();
 yield(a, "R", ["new"]);
 yield(a, "S", ["new"]);
-let b = emptyDB();
+let b = emptyDb();
 remove(b, "R", ["old"]);
 remove(b, "S", ["old"]);
 
 const pq = parseQuery;
 
-test(delta, pq("R x, S y"), x, a);
-test(delta, pq("R x, S y"), x, b);
+test(deltaCollect, pq("R x, S y"), x, a);
+test(deltaCollect, pq("R x, S y"), x, b);
 
 // something to note later: https://groups.google.com/g/v8-users/c/jlISWv1nXWU/m/LOLtbuovAgAJ
 
 // handle deletion (along with elements)
 function evalDelta(db, ddb, { query, output }) {
   let bindings = delta(query, db, ddb);
+  let result = emptyDb();
   for (let [tuple, weight] of bindings) {
     for (let pattern of output) {
       let tag = pattern[0];
       let args = unrename(tuple, pattern[1]);
       specialRelationHandler(tag, args);
-      yield(world, tag, args, weight);
+      yield(result, tag, args, weight);
     }
   }
+  dbAddDb(db, ddb);
+  dbAddDb(db, result);
 }
 
 {
+  let db = emptyDb();
   let query = pq("R x, S y");
   let output = pq("T x y");
-  test(evalDelta, emptyDB(), x, { query, output });
-  test(eval, world, "T x y");
-  test(evalDelta, x, b, { query, output });
-  test(eval, world, "T x y");
+  test(eval, db, "T x y");
+  evalDelta(db, x, { query, output });
+  test(eval, db, "T x y");
+  evalDelta(db, b, { query, output });
+  test(eval, db, "T x y");
 }
