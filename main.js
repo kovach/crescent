@@ -96,15 +96,33 @@ function dbAddDb(db1, db2) {
     relAddRel(selectRel(db1, tag), rel);
   }
 }
+// todo, delta of this
+function dedup(db) {
+  for (let rel of db.values()) {
+    for (let [key, [tuple, v]] of rel.entries()) {
+      if (v > 0) rel.set(key, [tuple, 1]);
+      if (v < 0) rel.set(key, [tuple, -1]);
+    }
+  }
+}
 const yield = dbAddTuple;
 const remove = (db, tag, tuple) => dbAddTuple(db, tag, tuple, -1);
 
 function iterRel(db, tag) {
   return selectRel(db, tag).values();
 }
+function* iterDb(db) {
+  for (let key of db.keys()) {
+    for (let [tuple, v] of iterRel(db, key)) {
+      yield [key, tuple, v];
+    }
+  }
+}
 function printDb(db) {
   console.log(
-    af(db.entries()).map(([tag, rel]) => [tag, af(rel.entries()).map(([key, [_, c]]) => [key, c])])
+    af(db.entries())
+      .map(([tag, rel]) => [tag, af(rel.entries()).map(([key, [_, c]]) => [key, c])])
+      .map((x) => str(x))
   );
 }
 /* end variables */
@@ -126,6 +144,7 @@ function joinTuple(t_, s_) {
   return [t, tv * sv];
 }
 
+// b *must* be re-startable
 function* join(a, b) {
   for (let t1 of a) {
     for (let t2 of b) {
@@ -175,6 +194,7 @@ test(joinsCollect, world, [
 
 function parseQuery(str) {
   // 'f a b, g b c'
+  if (str.trim() === "") return [];
   return str.split(",").map((w) => {
     // ['f', 'a', 'b']
     let lst = w
@@ -193,19 +213,21 @@ const ppQuery = (ps) => {
 // eta-expanded so that it has a `.name`
 const pp_parse = (x) => ppQuery(parseQuery(x));
 
-const eval = (db, str) => Array.from(joins(db, parseQuery(str)));
+const evalQuery = (db, str) => Array.from(joins(db, parseQuery(str)));
 
 test(pp_parse, "edge a b, edge b c");
-test(eval, world, "edge a b, edge b c");
+test(evalQuery, world, "edge a b, edge b c");
 
-function unrename(tuple, names) {
-  return names.reduce((acc, name) => {
-    if (name[0] === "`" || name[0] === "'") {
-      return acc.concat(name.slice(1));
+function unrename(tuple, atoms) {
+  result = [];
+  atoms.forEach((atom) => {
+    if (atom[0] === "`" || atom[0] === "'") {
+      result.push(atom.slice(1));
     } else {
-      return acc.concat([tuple[name]]);
+      result.push(tuple[atom]);
     }
-  }, []);
+  });
+  return result;
 }
 
 function evalRule(db, { query, output }) {
@@ -223,7 +245,7 @@ function parseRule(str) {
 }
 
 test(evalRule, world, parseRule("edge a b, edge b c -> edge2 a c"));
-test(eval, world, "edge2 x y");
+test(evalQuery, world, "edge2 x y");
 
 function getId(id) {
   return document.getElementById(id);
@@ -246,7 +268,7 @@ function createChildElem(type, parent) {
 function createChildId(type, id) {
   return createChildElem(type, getId(id));
 }
-function yieldElement(tag, id) {
+function createElement(tag, id) {
   let e = create(tag);
   e.id = id;
   return e;
@@ -254,9 +276,9 @@ function yieldElement(tag, id) {
 
 yield(world, "foo", ["a", "b"]);
 yield(world, "foo", ["A", "B"]);
-test(eval, world, "foo `A x");
+test(evalQuery, world, "foo `A x");
 test(evalRule, world, parseRule("foo `a y -> bar `foo-bar y"));
-test(eval, world, "bar x y");
+test(evalQuery, world, "bar x y");
 
 // assert
 try {
@@ -264,12 +286,30 @@ try {
   alert("assert should have failed!");
 } catch (e) {}
 
+function specialRelationHandlerUndo(tag, args) {
+  let msg = (name, expected) =>
+    `special relation '${name}' takes (${expected.join(",")}) but saw: (${args})`;
+  if (tag === "create") {
+    assert(args.length === 2, msg("create", ["element-type", "id"]));
+    // remove
+    getId(args[1]).remove();
+  } else if (tag === "style") {
+    assert(args.length === 3, msg("style", ["id", "css-prop", "value"]));
+    //no-op?
+  } else if (tag === "parent") {
+    assert(args.length === 2, msg("parent", ["id", "id"]));
+    //no-op?
+  } else if (tag === "inner") {
+    assert(args.length === 2, msg("inner", ["id", "content"]));
+    //no-op?
+  }
+}
 function specialRelationHandler(tag, args) {
   let msg = (name, expected) =>
     `special relation '${name}' takes (${expected.join(",")}) but saw: (${args})`;
   if (tag === "create") {
     assert(args.length === 2, msg("create", ["element-type", "id"]));
-    yieldElement(args[0], args[1]);
+    createElement(args[0], args[1]);
   } else if (tag === "style") {
     assert(args.length === 3, msg("style", ["id", "css-prop", "value"]));
     getId(args[0]).style[args[1]] = args[2];
@@ -318,7 +358,7 @@ function* delta(ps, x, a) {
   let S = ps.slice(1);
   let Rx = selectPattern(x, R);
   let Ra = af(selectPattern(a, R));
-  let Sx = joins(x, S);
+  let Sx = af(joins(x, S));
   let Sa = af(delta(S, x, a));
   for (let t of join(Ra, Sx)) yield t;
   for (let t of join(Rx, Sa)) yield t;
@@ -343,18 +383,39 @@ test(deltaCollect, pq("R x, S y"), x, b);
 
 // something to note later: https://groups.google.com/g/v8-users/c/jlISWv1nXWU/m/LOLtbuovAgAJ
 
-// handle deletion (along with elements)
 function evalDelta(db, ddb, { query, output }) {
+  console.log("eval");
+  printDb(ddb);
   let bindings = delta(query, db, ddb);
+  bindings = af(bindings);
+  console.log(afs(bindings));
   let result = emptyDb();
   for (let [tuple, weight] of bindings) {
     for (let pattern of output) {
       let tag = pattern[0];
       let args = unrename(tuple, pattern[1]);
-      specialRelationHandler(tag, args);
       yield(result, tag, args, weight);
     }
   }
+  //printDb(result);
+  return result;
+}
+
+function applyDelta(result) {
+  for (let [tag, tuple, v] of iterDb(result)) {
+    if (v > 0) {
+      assert(v === 1, "delta contains > 1 copies of tuple");
+      specialRelationHandler(tag, tuple);
+    }
+    if (v < 0) {
+      assert(v === -1, "delta contains < -1 copies of tuple");
+      specialRelationHandlerUndo(tag, tuple);
+    }
+  }
+}
+
+function evalDelta_(db, ddb, rule) {
+  let result = evalDelta(db, ddb, rule);
   dbAddDb(db, ddb);
   dbAddDb(db, result);
 }
@@ -363,9 +424,74 @@ function evalDelta(db, ddb, { query, output }) {
   let db = emptyDb();
   let query = pq("R x, S y");
   let output = pq("T x y");
-  test(eval, db, "T x y");
-  evalDelta(db, x, { query, output });
-  test(eval, db, "T x y");
-  evalDelta(db, b, { query, output });
-  test(eval, db, "T x y");
+  test(evalQuery, db, "T x y");
+  evalDelta_(db, x, { query, output });
+  test(evalQuery, db, "T x y");
+  evalDelta_(db, b, { query, output });
+  test(evalQuery, db, "T x y");
 }
+
+prog1Text = `
+->
+  item 'apple 'fruit,
+  item 'banana 'fruit,
+  item 'spinach 'vegetable,
+
+  in-stock 'apple,
+  in-stock 'spinach,
+
+  box-unchecked.
+
+item i cat, in-stock i    -> visible i.
+item i cat, box-unchecked -> visible i.
+
+visible i -> create 'div i, inner i i.
+visible i, item i cat -> create 'div cat, inner cat cat, parent i cat, parent cat 'app.
+`;
+
+function parseProgram(text) {
+  let rules = text
+    .split(".")
+    .filter((line) => line.trim().length > 0)
+    .map((line) => {
+      let rule = parseRule(line);
+      return rule;
+    });
+  let initiate = rules.filter(({ query }) => query.length === 0);
+  initiate = initiate.map(({ output }) => output);
+  rules = rules.filter(({ query }) => query.length !== 0);
+  return { initiate, rules };
+}
+function initProgram(db, { initiate }) {
+  for (let output of initiate) {
+    for (let [tag, atoms] of output) {
+      yield(db, tag, unrename({}, atoms));
+    }
+  }
+}
+
+prog1 = parseProgram(prog1Text);
+pp(prog1);
+db = emptyDb();
+ddb = emptyDb();
+initProgram(ddb, prog1);
+let gas = 4;
+while (ddb.size > 0 && gas-- > 0) {
+  //printDb(ddb);
+  let delta = emptyDb();
+  for (let rule of prog1.rules) {
+    let d = evalDelta(db, ddb, rule);
+    dbAddDb(delta, d);
+    //printDb(d);
+  }
+
+  applyDelta(ddb);
+  dbAddDb(db, ddb);
+  printDb(db);
+
+  dedup(delta);
+  ddb = delta;
+}
+//printDb(delta);
+
+scrollBody();

@@ -13,6 +13,12 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+div {
+  outline: solid;
+  padding: 5px;
+  margin: 10px;
+  border-radius: 10px;
+}
 a {
   font-weight: 500;
   color: #646cff;
@@ -24,6 +30,7 @@ a:hover {
 
 body {
   margin: 0;
+  padding: 5px;
   display: flex;
   /*place-items: center;*/
   min-width: 320px;
@@ -38,8 +45,6 @@ h1 {
 
 #app {
   max-width: 1280px;
-  margin: 0 auto;
-  padding: 0rem;
   /* text-align: center;*/
 }
 

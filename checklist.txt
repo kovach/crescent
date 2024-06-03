@@ -1,0 +1,44 @@
+[x] refactor away from world
+[x] handle deletion
+[x] accumulator array
+[x] iterators to avoid intermediate arrays
+[x] remove element, ordering?
+  [x] write desired display program
+    [x] parse list of rules
+    [x] eval ` -> fact.` rules
+[ ] the react example
+  programs
+  [ ] write program with check box
+  [ ] write program with regex search
+  [ ] regex
+    functions
+      [ ] tokenizer
+      [ ] function expressions
+      [ ] function dictionary
+[ ] negation
+aggregates
+  [ ] notation
+  [ ] impl
+programs
+  [ ] switch to parser
+  [ ] parse set of rules
+  [ ] deduplication operator
+  [ ] implement:
+    route delta to each rule,
+    dedup results
+    pass delta back in to fixed point
+    (sidesteps explicit network; optimize later)
+  [ ] main loop
+resource accounting
+  [ ] keys (and constant factor keys)
+  [ ] naive product estimate
+profiling
+  [ ] try it
+[ ] simple provenance
+  [ ] function invertibility
+[ ] symbolic query for compilation
+  think of unification
+  variable ordering determines preference when we see u ?= v
+  fixed parameters (a,b,...) vs lexical vars (x,y,...)
+    a is higher pri; so substituted for x
+[ ] actual unit tests
