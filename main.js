@@ -72,6 +72,9 @@ function getKey(rel, key) {
   let v = rel.get(key);
   return v === undefined ? 0 : v[1];
 }
+function dbGet(db, tag, tuple) {
+  return getKey(selectRel(db, tag), key(tuple));
+}
 function relAddTupleWithKey(rel, k, tuple, count = 1) {
   let v = getKey(rel, k) + count;
   if (v !== 0) rel.set(k, [tuple, v]);
@@ -384,11 +387,11 @@ test(deltaCollect, pq("R x, S y"), x, b);
 // something to note later: https://groups.google.com/g/v8-users/c/jlISWv1nXWU/m/LOLtbuovAgAJ
 
 function evalDelta(db, ddb, { query, output }) {
-  console.log("eval");
-  printDb(ddb);
+  //console.log("eval");
+  //printDb(ddb);
   let bindings = delta(query, db, ddb);
-  bindings = af(bindings);
-  console.log(afs(bindings));
+  bindings = bindings;
+  //console.log(afs(bindings));
   let result = emptyDb();
   for (let [tuple, weight] of bindings) {
     for (let pattern of output) {
@@ -401,15 +404,16 @@ function evalDelta(db, ddb, { query, output }) {
   return result;
 }
 
-function applyDelta(result) {
+function applyDelta(db, result) {
   for (let [tag, tuple, v] of iterDb(result)) {
     if (v > 0) {
-      assert(v === 1, "delta contains > 1 copies of tuple");
-      specialRelationHandler(tag, tuple);
+      //assert(v === 1, "delta contains > 1 copies of tuple");
+      if (dbGet(db, tag, tuple) === 0) specialRelationHandler(tag, tuple);
     }
     if (v < 0) {
-      assert(v === -1, "delta contains < -1 copies of tuple");
-      specialRelationHandlerUndo(tag, tuple);
+      //console.log("removing!");
+      //assert(v === -1, "delta contains < -1 copies of tuple");
+      if (dbGet(db, tag, tuple) === 1) specialRelationHandlerUndo(tag, tuple);
     }
   }
 }
@@ -437,15 +441,16 @@ prog1Text = `
   item 'banana 'fruit,
   item 'spinach 'vegetable,
 
-  in-stock 'apple,
-  in-stock 'spinach,
+  in-stock 'apple 'true,
+  in-stock 'spinach 'true,
+  in-stock 'banana 'false,
 
   box-unchecked.
 
-item i cat, in-stock i    -> visible i.
-item i cat, box-unchecked -> visible i.
+item i cat, in-stock i 'true                 -> visible i.
+item i cat, in-stock i 'false, box-unchecked -> visible i.
 
-visible i -> create 'div i, inner i i.
+visible i             -> create 'div i,   inner i i.
 visible i, item i cat -> create 'div cat, inner cat cat, parent i cat, parent cat 'app.
 `;
 
@@ -471,27 +476,50 @@ function initProgram(db, { initiate }) {
 }
 
 prog1 = parseProgram(prog1Text);
-pp(prog1);
-db = emptyDb();
-ddb = emptyDb();
-initProgram(ddb, prog1);
-let gas = 4;
-while (ddb.size > 0 && gas-- > 0) {
-  //printDb(ddb);
-  let delta = emptyDb();
-  for (let rule of prog1.rules) {
-    let d = evalDelta(db, ddb, rule);
-    dbAddDb(delta, d);
-    //printDb(d);
+//pp(prog1);
+function updateProg(db, ddb, prog) {
+  let gas = 10;
+  while (ddb.size > 0 && gas-- > 0) {
+    //printDb(ddb);
+    let delta = emptyDb();
+    for (let rule of prog.rules) {
+      let d = evalDelta(db, ddb, rule);
+      dbAddDb(delta, d);
+      //printDb(d);
+    }
+
+    applyDelta(db, ddb);
+    dbAddDb(db, ddb);
+    //printDb(db);
+
+    //dedup(delta);
+    ddb = delta;
   }
-
-  applyDelta(ddb);
-  dbAddDb(db, ddb);
-  printDb(db);
-
-  dedup(delta);
-  ddb = delta;
+  scrollBody();
 }
-//printDb(delta);
 
-scrollBody();
+db = emptyDb();
+function do1() {
+  ddb = emptyDb();
+  initProgram(ddb, prog1);
+
+  updateProg(db, ddb, prog1);
+  printDb(db);
+}
+
+function do2() {
+  ddb = emptyDb();
+  yield(ddb, "box-unchecked", [], -1);
+  updateProg(db, ddb, prog1);
+  printDb(db);
+}
+
+function do3() {
+  ddb = emptyDb();
+  yield(ddb, "box-unchecked", [], 1);
+  updateProg(db, ddb, prog1);
+  printDb(db);
+}
+
+do1();
+//do2();

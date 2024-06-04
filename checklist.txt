@@ -7,6 +7,7 @@
     [x] parse list of rules
     [x] eval ` -> fact.` rules
 [ ] the react example
+  [ ] tuple literals for ids
   programs
   [ ] write program with check box
   [ ] write program with regex search
@@ -15,7 +16,8 @@
       [ ] tokenizer
       [ ] function expressions
       [ ] function dictionary
-[ ] negation
+  [ ] color out of stock
+        [ ] negation
 aggregates
   [ ] notation
   [ ] impl
@@ -23,15 +25,11 @@ programs
   [ ] switch to parser
   [ ] parse set of rules
   [ ] deduplication operator
-  [ ] implement:
-    route delta to each rule,
-    dedup results
-    pass delta back in to fixed point
-    (sidesteps explicit network; optimize later)
   [ ] main loop
 resource accounting
   [ ] keys (and constant factor keys)
   [ ] naive product estimate
+  [ ] cardinality constraints
 profiling
   [ ] try it
 [ ] simple provenance
